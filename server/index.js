@@ -183,6 +183,7 @@ io.on('connection', (socket) => {
     socket.emit('state', null);
   });
   action(socket, 'setHandSize', (player, { size }) => game.setHandSize(player.id, size));
+  action(socket, 'setRounds', (player, { count }) => game.setRounds(player.id, count));
   action(socket, 'setJudging', (player, { mode }) => game.setJudging(player.id, mode));
   action(socket, 'setCategories', (player, { keys }) => game.setCategories(player.id, keys));
   action(socket, 'start', (player) => game.start(player.id));

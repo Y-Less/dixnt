@@ -15,11 +15,17 @@
 //               CHOOSER_CORRECT_POINTS; if they are fooled the imposter scores CHOOSER_FOOLED_POINTS.
 //
 // The deck is built from the categories the host selects (cards come in categories; see getCategories below).
+//
+// Length: the game ends once every player has chosen the word `roundsEach` times (a round only counts as a turn
+// once it has been completed). Then the phase becomes 'finished' and the host can return everyone to the lobby.
 
 export const POINTS_PER_VOTE = 100;
 export const CHOOSER_CORRECT_POINTS = 100;
 export const CHOOSER_FOOLED_POINTS = 500;
 export const JUDGING_MODES = ['everyone', 'chooser'];
+export const MIN_ROUNDS_EACH = 1;
+export const MAX_ROUNDS_EACH = 10;
+export const DEFAULT_ROUNDS_EACH = 2;
 export const MIN_PLAYERS = 3;
 export const MIN_HAND_SIZE = 3;
 export const MAX_HAND_SIZE = 12;
@@ -68,11 +74,13 @@ export class Game {
   static blankState() {
     return {
       phase: 'lobby',
-      players: [], // { id, token, name, score, hand: number[], waiting: boolean }
+      players: [], // { id, token, name, score, turns, hand: number[], waiting: boolean }
       hostId: null,
       handSize: DEFAULT_HAND_SIZE,
       judging: 'everyone',
       categories: null, // selected category keys; null means "all of them"
+      roundsEach: DEFAULT_ROUNDS_EACH, // how many times every player chooses the word
+      completed: 0, // rounds finished so far (abandoned rounds don't count)
       round: 0,
       nextChooserIdx: 0,
       chooserId: null,
@@ -181,6 +189,7 @@ export class Game {
       token,
       name: clean,
       score: 0,
+      turns: 0, // rounds this player has completed as the word-chooser
       hand: [],
       waiting: this.s.phase !== 'lobby', // late joiners wait for the next round
     };
@@ -199,14 +208,19 @@ export class Game {
     if (index < s.nextChooserIdx) s.nextChooserIdx--;
     if (s.hostId === targetId) s.hostId = s.players[0]?.id ?? null;
     if (!s.players.length) {
-      Object.assign(s, Game.blankState(), { handSize: s.handSize, judging: s.judging, categories: s.categories });
+      Object.assign(s, Game.blankState(), {
+        handSize: s.handSize,
+        judging: s.judging,
+        categories: s.categories,
+        roundsEach: s.roundsEach,
+      });
       return;
     }
     if (s.phase === 'lobby') return;
     if (s.players.length < MIN_PLAYERS) {
       this.returnToLobby();
     } else if (!removed.waiting) {
-      this.startRound(); // the round can't continue without them, so move on
+      this.advance(); // the round can't continue without them, so move on
     }
   }
 
@@ -218,6 +232,16 @@ export class Game {
       fail(`Hand size must be between ${MIN_HAND_SIZE} and ${MAX_HAND_SIZE}.`);
     }
     this.s.handSize = n;
+  }
+
+  setRounds(byId, count) {
+    if (!this.isHost(byId)) fail('Only the host can change the number of rounds.');
+    if (this.s.phase !== 'lobby') fail('The number of rounds can only be changed in the lobby.');
+    const n = Math.round(Number(count));
+    if (!(n >= MIN_ROUNDS_EACH && n <= MAX_ROUNDS_EACH)) {
+      fail(`Each player can choose the word between ${MIN_ROUNDS_EACH} and ${MAX_ROUNDS_EACH} times.`);
+    }
+    this.s.roundsEach = n;
   }
 
   setJudging(byId, mode) {
@@ -252,8 +276,10 @@ export class Game {
     for (const p of s.players) {
       p.hand = [];
       p.score = 0;
+      p.turns = 0;
     }
     s.round = 0;
+    s.completed = 0;
     s.nextChooserIdx = 0;
     this.startRound();
   }
@@ -264,6 +290,7 @@ export class Game {
     Object.assign(s, {
       phase: 'lobby',
       round: 0,
+      completed: 0,
       chooserId: null,
       draw: [],
       discard: [],
@@ -277,6 +304,7 @@ export class Game {
     for (const p of s.players) {
       p.hand = [];
       p.waiting = false;
+      p.turns = 0;
     }
   }
 
@@ -287,7 +315,18 @@ export class Game {
     this.syncCards();
     for (const p of s.players) p.waiting = false;
     s.round++;
-    const idx = s.nextChooserIdx % s.players.length;
+    // Normally just the next player in join order; anyone who has already had all their turns is skipped while
+    // somebody else still owes some (this happens after skipped rounds or when someone joins late).
+    const owes = (player) => (player.turns ?? 0) < s.roundsEach;
+    const someoneOwes = s.players.some(owes);
+    let idx = s.nextChooserIdx % s.players.length;
+    for (let step = 0; step < s.players.length; step++) {
+      const candidate = (s.nextChooserIdx + step) % s.players.length;
+      if (!someoneOwes || owes(s.players[candidate])) {
+        idx = candidate;
+        break;
+      }
+    }
     s.chooserId = s.players[idx].id;
     s.nextChooserIdx = idx + 1;
     Object.assign(s, { word: null, imposterId: null, picks: {}, tableOrder: [], votes: {}, results: null });
@@ -376,7 +415,7 @@ export class Game {
     for (const p of this.inRound()) p.score += deltas[p.id];
 
     s.results = { judging: 'everyone', imposterId: s.imposterId, groupCorrect, tally, deltas, votes: { ...s.votes } };
-    s.phase = 'results';
+    this.completeRound();
   }
 
   /** Chooser-only judging: spot the imposter and the chooser scores; get fooled and the imposter scores big. */
@@ -391,6 +430,15 @@ export class Game {
 
     const tally = Object.fromEntries(this.cardPlayers().map((p) => [p.id, p.id === accusedId ? 1 : 0]));
     s.results = { judging: 'chooser', imposterId: s.imposterId, accusedId, groupCorrect, tally, deltas, votes: { ...s.votes } };
+    this.completeRound();
+  }
+
+  /** Records a finished round: it counts as a turn for the chooser, and the results are shown. */
+  completeRound() {
+    const s = this.s;
+    const chooser = this.player(s.chooserId);
+    if (chooser) chooser.turns = (chooser.turns ?? 0) + 1;
+    s.completed++;
     s.phase = 'results';
   }
 
@@ -405,7 +453,29 @@ export class Game {
       p.hand = p.hand.filter((c) => c !== cardId);
       s.discard.push(cardId);
     }
-    this.startRound();
+    this.advance();
+  }
+
+  /** Has every player chosen the word as many times as the host asked for? */
+  allDone() {
+    return this.s.players.every((p) => (p.turns ?? 0) >= this.s.roundsEach);
+  }
+
+  /** How many more rounds are needed before everyone has had all their turns. */
+  roundsRemaining() {
+    return this.s.players.reduce((sum, p) => sum + Math.max(0, this.s.roundsEach - (p.turns ?? 0)), 0);
+  }
+
+  /** Moves on after a round: either the next round, or the end of the game. */
+  advance() {
+    if (this.allDone()) this.s.phase = 'finished';
+    else this.startRound();
+  }
+
+  /** Everyone sharing the highest score. */
+  winnerIds() {
+    const best = Math.max(...this.s.players.map((p) => p.score));
+    return this.s.players.filter((p) => p.score === best).map((p) => p.id);
   }
 
   // ---------- what each player is allowed to see ----------
@@ -426,6 +496,10 @@ export class Game {
     return {
       phase: s.phase,
       round: s.round,
+      roundsEach: s.roundsEach,
+      completedRounds: s.completed,
+      totalRounds: s.completed + this.roundsRemaining(), // grows if somebody joins late
+      winners: s.phase === 'finished' ? this.winnerIds() : [],
       handSize: s.handSize,
       chooserId: s.chooserId,
       hostId: s.hostId,
@@ -450,7 +524,7 @@ export class Game {
         id: me.id,
         waiting: me.waiting,
         isChooser: id === s.chooserId,
-        hand: me.waiting || s.phase === 'lobby' ? [] : me.hand,
+        hand: me.waiting || ['lobby', 'finished'].includes(s.phase) ? [] : me.hand,
         myPick: s.picks[id] ?? null,
         myVote: s.votes[id] ?? null,
         isImposter: s.phase === 'results' && iAmImposter,
@@ -459,6 +533,7 @@ export class Game {
         id: p.id,
         name: p.name,
         score: p.score,
+        turns: p.turns ?? 0,
         waiting: p.waiting,
         connected: connectedIds.has(p.id),
         isChooser: p.id === s.chooserId,

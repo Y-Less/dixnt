@@ -11,10 +11,11 @@ function seededRng(seed = 1) {
   };
 }
 
-function makeGame(names, { cardCount = 100, handSize = 8 } = {}) {
+function makeGame(names, { cardCount = 100, handSize = 8, roundsEach = 10 } = {}) {
   const game = new Game({ getCardIds: () => cards(cardCount), hints: cards(30).map((n) => `hint ${n}`), rng: seededRng(7) });
   const players = names.map((name) => game.addPlayer(name, `token-${name}`));
   game.setHandSize(players[0].id, handSize);
+  game.setRounds(players[0].id, roundsEach); // plenty, so these tests are not cut short by the game ending
   game.start(players[0].id);
   return { game, players };
 }

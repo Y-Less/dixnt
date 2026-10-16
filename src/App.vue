@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { isHost, send, store } from './store.js';
 import Hand from './components/Hand.vue';
 import JoinScreen from './components/JoinScreen.vue';
+import FinishedPanel from './components/FinishedPanel.vue';
 import Lightbox from './components/Lightbox.vue';
 import LobbyView from './components/LobbyView.vue';
 import PhasePanel from './components/PhasePanel.vue';
@@ -30,14 +31,15 @@ async function skipRound() {
   <div v-else class="game">
     <header>
       <h1>Imposter Dixit</h1>
-      <span v-if="state.phase !== 'lobby'" class="muted round">
-        Round {{ state.round }} · deck {{ state.drawCount }} / discard {{ state.discardCount }}
+      <span v-if="state.phase === 'finished'" class="muted round">Game over</span>
+      <span v-else-if="state.phase !== 'lobby'" class="muted round">
+        Round {{ state.round }} of {{ state.totalRounds }} · deck {{ state.drawCount }} / discard {{ state.discardCount }}
       </span>
       <div class="menu">
         <button v-if="isHost && ['word', 'picking', 'voting'].includes(state.phase)" class="quiet" @click="skipRound">
           Skip round
         </button>
-        <button v-if="isHost && state.phase !== 'lobby'" class="quiet" @click="endGame">End game</button>
+        <button v-if="isHost && !['lobby', 'finished'].includes(state.phase)" class="quiet" @click="endGame">End game</button>
         <button class="quiet" @click="leave">Leave</button>
       </div>
     </header>
@@ -47,6 +49,7 @@ async function skipRound() {
     <main class="stack">
       <LobbyView v-if="state.phase === 'lobby'" />
       <ResultsPanel v-else-if="state.phase === 'results'" />
+      <FinishedPanel v-else-if="state.phase === 'finished'" />
       <PhasePanel v-else />
       <Hand v-if="showHand" />
     </main>

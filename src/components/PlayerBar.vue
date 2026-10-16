@@ -17,7 +17,7 @@ function status(p) {
     return p.hasVoted ? { text: 'decided', tone: 'done' } : { text: 'deciding', tone: 'busy' };
   }
   if (phase === 'voting') return p.hasVoted ? { text: 'voted', tone: 'done' } : { text: 'not voted yet', tone: 'busy' };
-  if (phase !== 'lobby' && p.isChooser) return { text: 'chooser', tone: 'muted' };
+  if (!['lobby', 'finished'].includes(phase) && p.isChooser) return { text: 'chooser', tone: 'muted' };
   return null;
 }
 

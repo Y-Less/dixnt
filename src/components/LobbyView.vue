@@ -110,13 +110,32 @@ async function copyLink() {
           @change="send('setHandSize', { size: $event.target.value })"
         />
       </label>
+      <label class="row">
+        Times each player chooses the word
+        <input
+          type="number"
+          class="num"
+          min="1"
+          max="10"
+          :value="state.roundsEach"
+          @change="send('setRounds', { count: $event.target.value })"
+        />
+      </label>
+      <p class="muted">
+        The game ends once everyone has chosen {{ state.roundsEach }} time{{ state.roundsEach === 1 ? '' : 's' }}: that is
+        {{ players.length * state.roundsEach }} round{{ players.length * state.roundsEach === 1 ? '' : 's' }} with
+        {{ players.length }} player{{ players.length === 1 ? '' : 's' }}.
+      </p>
       <button class="primary" :disabled="missingPlayers > 0 || !enoughCards" @click="send('start')">
         <template v-if="missingPlayers > 0">Need {{ missingPlayers }} more player{{ missingPlayers === 1 ? '' : 's' }}</template>
         <template v-else-if="!enoughCards">Choose more categories</template>
         <template v-else>Start the game</template>
       </button>
     </template>
-    <p v-else class="muted">Waiting for the host to start the game. Hands will be {{ state.handSize }} cards.</p>
+    <p v-else class="muted">
+      Waiting for the host to start the game. Hands will be {{ state.handSize }} cards, and everyone chooses the word
+      {{ state.roundsEach }} time{{ state.roundsEach === 1 ? '' : 's' }}.
+    </p>
   </section>
 
   <section class="panel rules">

@@ -9,6 +9,7 @@ const results = computed(() => state.value.results);
 const standings = computed(() => [...players.value].filter((p) => !p.waiting).sort((a, b) => b.score - a.score));
 const gained = (id) => results.value.deltas[id] ?? 0;
 const chooserId = computed(() => state.value.chooserId);
+const isLastRound = computed(() => state.value.completedRounds >= state.value.totalRounds);
 const nextChooser = computed(() => {
   const list = players.value;
   const current = list.findIndex((p) => p.isChooser);
@@ -49,8 +50,11 @@ const nextChooser = computed(() => {
         <span class="score">{{ p.score }}</span>
       </li>
     </ol>
-    <button class="primary" @click="send('nextRound')">Next round: {{ nextChooser }} chooses the word</button>
-    <p class="muted small">Played cards are discarded and everyone draws back up to {{ state.handSize }} cards.</p>
+    <button v-if="isLastRound" class="primary" @click="send('nextRound')">That was the last round: see the final scores</button>
+    <template v-else>
+      <button class="primary" @click="send('nextRound')">Next round: {{ nextChooser }} chooses the word</button>
+      <p class="muted small">Played cards are discarded and everyone draws back up to {{ state.handSize }} cards.</p>
+    </template>
   </section>
 </template>
 
