@@ -8,6 +8,7 @@ const state = computed(() => store.state);
 const results = computed(() => state.value.results);
 const standings = computed(() => [...players.value].filter((p) => !p.waiting).sort((a, b) => b.score - a.score));
 const gained = (id) => results.value.deltas[id] ?? 0;
+const chooserId = computed(() => state.value.chooserId);
 const nextChooser = computed(() => {
   const list = players.value;
   const current = list.findIndex((p) => p.isChooser);
@@ -20,11 +21,21 @@ const nextChooser = computed(() => {
 
   <section class="panel stack verdict" :class="results.groupCorrect ? 'caught' : 'escaped'">
     <h2>{{ nameOf(results.imposterId) }} was the imposter!</h2>
-    <p v-if="results.groupCorrect">The group found them. Everyone who voted for them scores {{ state.pointsPerVote }}.</p>
-    <p v-else>
-      The group was fooled! {{ nameOf(results.imposterId) }} scores {{ gained(results.imposterId) }}
-      ({{ state.pointsPerVote }} for each player who missed them).
-    </p>
+    <template v-if="results.judging === 'chooser'">
+      <p v-if="results.groupCorrect">
+        {{ nameOf(chooserId) }} guessed right and scores {{ state.pointsChooserCorrect }}.
+      </p>
+      <p v-else>
+        {{ nameOf(chooserId) }} was fooled! {{ nameOf(results.imposterId) }} scores {{ state.pointsFooledChooser }}.
+      </p>
+    </template>
+    <template v-else>
+      <p v-if="results.groupCorrect">The group found them. Everyone who voted for them scores {{ state.pointsPerVote }}.</p>
+      <p v-else>
+        The group was fooled! {{ nameOf(results.imposterId) }} scores {{ gained(results.imposterId) }}
+        ({{ state.pointsPerVote }} for each player who missed them).
+      </p>
+    </template>
   </section>
 
   <Table />

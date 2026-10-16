@@ -12,6 +12,10 @@ function status(p) {
     if (p.isChooser) return { text: 'chooser', tone: 'muted' };
     return p.hasPlayed ? { text: 'played', tone: 'done' } : { text: 'choosing a card', tone: 'busy' };
   }
+  if (phase === 'voting' && state.value.judging === 'chooser') {
+    if (!p.isChooser) return { text: 'making their case', tone: 'busy' };
+    return p.hasVoted ? { text: 'decided', tone: 'done' } : { text: 'deciding', tone: 'busy' };
+  }
   if (phase === 'voting') return p.hasVoted ? { text: 'voted', tone: 'done' } : { text: 'not voted yet', tone: 'busy' };
   if (phase !== 'lobby' && p.isChooser) return { text: 'chooser', tone: 'muted' };
   return null;

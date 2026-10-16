@@ -12,9 +12,25 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const PORT = 3123;
 const URL = `http://localhost:${PORT}`;
 
+/** Two small fake categories (empty image files are enough: the server only looks at the file names). */
+function makeFakeCards(cardsDir) {
+  fs.mkdirSync(path.join(cardsDir, 'medium'), { recursive: true });
+  const categories = [
+    { key: 'alpha', label: 'Alpha', start: 10001 },
+    { key: 'beta', label: 'Beta', start: 20001 },
+  ].map(({ key, label, start }) => {
+    const ids = Array.from({ length: 120 }, (_, i) => start + i);
+    for (const id of ids) fs.writeFileSync(path.join(cardsDir, 'medium', `card_${id}.jpg`), '');
+    return { key, label, description: `${label} cards`, ids };
+  });
+  fs.writeFileSync(path.join(cardsDir, 'categories.json'), JSON.stringify({ categories }));
+}
+
 function startServer(dataDir) {
+  const cardsDir = path.join(dataDir, 'cards');
+  makeFakeCards(cardsDir);
   const child = spawn(process.execPath, [path.join(here, 'index.js')], {
-    env: { ...process.env, PORT: String(PORT), DATA_DIR: dataDir },
+    env: { ...process.env, PORT: String(PORT), DATA_DIR: dataDir, CARDS_DIR: cardsDir },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
   return new Promise((resolve, reject) => {
@@ -156,7 +172,11 @@ test('game state survives a server restart', async (t) => {
   bob.socket.close();
 });
 
-test('external bot processes play whole rounds using only the API', async (t) => {
+/**
+ * Plays two rounds against three real bot processes. The human host joins first, picks the settings, then plays
+ * (or judges) alongside the bots.
+ */
+async function playBotGame(t, { judging, categories }) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dixit-e2e-'));
   const server = await startServer(dataDir);
   const tokenFile = path.join(dataDir, 'bot-tokens.json');
@@ -175,13 +195,20 @@ test('external bot processes play whole rounds using only the API', async (t) =>
       if (condition()) return;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    assert.fail(`timed out waiting for: ${what}
-phase=${human.state?.phase} round=${human.state?.round} chooser=${human.state?.players.find((p) => p.isChooser)?.name}
-bot output:
-${botLog.join('')}`);
+    const where = `phase=${human.state?.phase} round=${human.state?.round}`;
+    assert.fail(`timed out waiting for: ${what} (${where})\nbot output:\n${botLog.join('')}`);
   };
 
   assert.equal((await human.join()).ok, true);
+  await until(() => human.state, 'the first state update');
+  assert.deepEqual(
+    human.state.categories.map((c) => [c.key, c.count, c.selected]),
+    [['alpha', 120, true], ['beta', 120, true]],
+    'the server offers both categories, all selected by default',
+  );
+  assert.equal((await human.call('setJudging', { mode: judging })).ok, true);
+  assert.equal((await human.call('setCategories', { keys: categories })).ok, true);
+
   for (const name of ['Robin', 'Sam', 'Tess']) {
     const child = spawn(
       process.execPath,
@@ -192,30 +219,57 @@ ${botLog.join('')}`);
     botProcesses.push(child);
   }
   await until(() => human.state?.players.length === 4, 'all bots to join');
+  assert.equal(human.state.judging, judging);
   assert.equal((await human.call('start')).ok, true);
 
+  const resultsSeen = [];
   for (let round = 1; round <= 2; round++) {
     await until(() => human.state.round === round, `round ${round} to start`);
+    for (const cardId of human.state.me.hand) {
+      assert.ok(categories.some((key) => (key === 'alpha' ? cardId < 20000 : cardId >= 20000 && cardId < 30000)), 'only selected categories are dealt');
+    }
     if (human.state.me.isChooser) {
       assert.equal((await human.call('submitWord', { word: 'a human word' })).ok, true);
     }
     await until(() => human.state.phase !== 'word', 'the word to be set (by the human or a bot)');
     if (!human.state.me.isChooser) {
-      await until(() => human.state.phase === 'picking' || human.state.phase === 'voting', 'cards to be requested');
+      await until(() => ['picking', 'voting', 'results'].includes(human.state.phase), 'cards to be requested');
       if (human.state.phase === 'picking') {
         assert.equal((await human.call('playCard', { cardId: human.state.me.hand[0] })).ok, true);
       }
     }
-    await until(() => human.state.phase === 'voting', 'all cards to be played');
-    assert.equal(human.state.table.length, 3, 'every non-chooser played exactly one card');
-    assert.equal((await human.call('vote', { targetId: human.state.voteTargets[0] })).ok, true);
-    await until(() => human.state.phase === 'results', 'all bots to vote');
-    assert.equal(Object.keys(human.state.results.votes).length, 4, 'every player, bots included, voted');
+    await until(() => ['voting', 'results'].includes(human.state.phase), 'all cards to be played');
+
+    if (human.state.phase === 'voting' && human.state.voteTargets.length) {
+      assert.equal((await human.call('vote', { targetId: human.state.voteTargets[0] })).ok, true);
+    } else if (judging === 'chooser') {
+      const refused = await human.call('vote', { targetId: human.state.players.find((p) => !p.isChooser && p.id !== human.state.me.id)?.id });
+      if (human.state.phase === 'voting') assert.equal(refused.ok, false, 'a non-chooser cannot vote in chooser-only judging');
+    }
+    await until(() => human.state.phase === 'results', 'the verdict');
+    const { results } = human.state;
+    assert.equal(results.judging, judging);
+    assert.equal(Object.keys(results.votes).length, judging === 'chooser' ? 1 : 4);
+    resultsSeen.push(results);
     if (round === 1) assert.equal((await human.call('nextRound')).ok, true);
   }
 
   const log = botLog.join('');
-  assert.match(log, /chose the word "/, 'a bot picked a word from the hint list when it was the chooser');
   assert.match(log, /played card \d+/);
-  assert.match(log, /voted for /);
-});
+  if (judging === 'everyone') assert.match(log, /voted for /);
+  else {
+    // In chooser-only judging a bot only votes in the round it is the chooser, and the points are 100 or 500.
+    for (const r of resultsSeen) {
+      const gained = Object.values(r.deltas).filter(Boolean);
+      assert.equal(gained.length <= 1, true, 'only one player scores in chooser-only judging');
+      assert.ok(gained.length === 0 || [100, 500].includes(gained[0]));
+    }
+  }
+  assert.match(log, /chose the word "/, 'a bot picked a word from the hint list when it was the chooser');
+}
+
+test('external bot processes play whole rounds using only the API (everyone votes)', (t) =>
+  playBotGame(t, { judging: 'everyone', categories: ['alpha', 'beta'] }));
+
+test('external bot processes play whole rounds in chooser-only judging, with one category', (t) =>
+  playBotGame(t, { judging: 'chooser', categories: ['beta'] }));

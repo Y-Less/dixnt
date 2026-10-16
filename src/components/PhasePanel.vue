@@ -38,7 +38,23 @@ const waitingOnVotes = computed(() => inRound.value.filter((p) => !p.hasVoted));
   <!-- 3. Cards revealed: talk it through and vote whenever you like -->
   <template v-else-if="state.phase === 'voting'">
     <WordBanner />
-    <section class="panel stack">
+    <section v-if="state.judging === 'chooser'" class="panel stack">
+      <h2>{{ state.me.isChooser ? 'Who was in the dark?' : `${chooser?.name} will decide who was in the dark` }}</h2>
+      <p v-if="state.me.isChooser" class="muted">
+        Listen to everyone explain their card, then pick the player you think didn’t see the word. Guess right and you
+        score {{ state.pointsChooserCorrect }}. If you’re fooled, the imposter scores {{ state.pointsFooledChooser }}.
+      </p>
+      <p v-else class="muted">
+        Explain why your card fits the word. If {{ chooser?.name }} guesses the imposter they score
+        {{ state.pointsChooserCorrect }}; if they’re fooled, the imposter scores {{ state.pointsFooledChooser }}.
+      </p>
+      <p class="status">
+        <template v-if="state.me.isChooser && state.me.myVote === null">You haven’t decided yet.</template>
+        <template v-else-if="state.me.isChooser">You’ve decided.</template>
+        <template v-else>Waiting for {{ chooser?.name }} to decide…</template>
+      </p>
+    </section>
+    <section v-else class="panel stack">
       <h2>Who was in the dark?</h2>
       <p class="muted">
         Explain why you chose your card and listen to the others. You can vote at any time, and change your vote

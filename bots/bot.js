@@ -7,7 +7,7 @@
 // Behaviour:
 //   - when it is the chooser it asks the server for hint words (the game's own word list) and picks one
 //   - when cards are being played it plays a random card from its hand
-//   - when voting it votes for a random player
+//   - when voting it votes for a random player (if the game's judging method lets it vote at all)
 // It does not start the game or move on to the next round: a human (or another client) does that.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -109,7 +109,7 @@ async function act() {
   } else if (s.phase === 'picking' && !s.me.isChooser && s.me.myPick === null) {
     key = `${s.round}:picking`;
     action = playRandomCard;
-  } else if (s.phase === 'voting' && s.me.myVote === null) {
+  } else if (s.phase === 'voting' && s.me.myVote === null && s.voteTargets.length > 0) {
     key = `${s.round}:voting`;
     action = voteRandomly;
   }

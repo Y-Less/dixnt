@@ -7,10 +7,19 @@
 //               (changing their vote until the last vote is in). The round ends once everyone has voted.
 //   results     the imposter is revealed and points are awarded
 //
-// Verdict: the group is correct only if the imposter has strictly the most votes. A tie for most votes
-// (including the imposter tying with another player) counts as the group being wrong.
+// Two judging methods, chosen by the host in the lobby:
+//   'everyone'  every player votes. The group is correct only if the imposter has strictly the most votes (a tie
+//               counts as wrong). If correct, each player who voted for the imposter scores POINTS_PER_VOTE. If
+//               wrong, the imposter scores POINTS_PER_VOTE for each other player who didn't vote for them.
+//   'chooser'   only the word-chooser votes. If they spot the imposter the chooser scores
+//               CHOOSER_CORRECT_POINTS; if they are fooled the imposter scores CHOOSER_FOOLED_POINTS.
+//
+// The deck is built from the categories the host selects (cards come in categories; see getCategories below).
 
 export const POINTS_PER_VOTE = 100;
+export const CHOOSER_CORRECT_POINTS = 100;
+export const CHOOSER_FOOLED_POINTS = 500;
+export const JUDGING_MODES = ['everyone', 'chooser'];
 export const MIN_PLAYERS = 3;
 export const MIN_HAND_SIZE = 3;
 export const MAX_HAND_SIZE = 12;
@@ -36,19 +45,23 @@ const newPublicId = () => Math.random().toString(36).slice(2, 10);
 export class Game {
   /**
    * @param {object} options
-   * @param {() => number[]} options.getCardIds returns the ids of every card currently available
+   * @param {() => {key: string, label: string, description?: string, ids: number[]}[]} [options.getCategories]
+   *        the cards currently available, grouped into categories
+   * @param {() => number[]} [options.getCardIds] shortcut for a single category containing every card
    * @param {string[]} options.hints word/phrase suggestions for the chooser
    * @param {() => number} [options.rng]
    * @param {object} [options.saved] a previously saved state (see toJSON)
    */
-  constructor({ getCardIds, hints = [], rng = Math.random, saved = null }) {
-    this.getCardIds = getCardIds;
+  constructor({ getCategories, getCardIds, hints = [], rng = Math.random, saved = null }) {
+    this.getCategories =
+      getCategories ?? (() => [{ key: 'all', label: 'All cards', description: '', ids: getCardIds ? getCardIds() : [] }]);
     this.hints = hints;
     this.rng = rng;
     this.hintPool = [];
-    this.s = saved ?? Game.blankState();
+    this.s = { ...Game.blankState(), ...(saved ?? {}) };
     if (this.s.phase === 'discussion') this.s.phase = 'voting'; // saved by an older version that had a separate step
     delete this.s.ready;
+    this.normaliseSettings();
     this.syncCards();
   }
 
@@ -58,6 +71,8 @@ export class Game {
       players: [], // { id, token, name, score, hand: number[], waiting: boolean }
       hostId: null,
       handSize: DEFAULT_HAND_SIZE,
+      judging: 'everyone',
+      categories: null, // selected category keys; null means "all of them"
       round: 0,
       nextChooserIdx: 0,
       chooserId: null,
@@ -106,9 +121,27 @@ export class Game {
 
   // ---------- deck ----------
 
+  /** Makes sure the saved settings are valid for the categories that exist now. */
+  normaliseSettings() {
+    const s = this.s;
+    if (!JUDGING_MODES.includes(s.judging)) s.judging = 'everyone';
+    const known = this.getCategories().map((c) => c.key);
+    const chosen = Array.isArray(s.categories) ? s.categories.filter((key) => known.includes(key)) : [];
+    s.categories = chosen.length ? chosen : known;
+  }
+
+  selectedCategories() {
+    return this.getCategories().filter((c) => this.s.categories.includes(c.key));
+  }
+
+  /** Ids of every card in the selected categories. */
+  availableIds() {
+    return [...new Set(this.selectedCategories().flatMap((c) => c.ids))];
+  }
+
   /** Keeps the deck in step with the cards on disk: new cards join the draw pile, missing ones vanish. */
   syncCards() {
-    const available = new Set(this.getCardIds());
+    const available = new Set(this.availableIds());
     const s = this.s;
     const known = new Set();
     const keep = (id) => available.has(id) && !known.has(id) && known.add(id);
@@ -166,7 +199,7 @@ export class Game {
     if (index < s.nextChooserIdx) s.nextChooserIdx--;
     if (s.hostId === targetId) s.hostId = s.players[0]?.id ?? null;
     if (!s.players.length) {
-      Object.assign(s, Game.blankState(), { handSize: s.handSize });
+      Object.assign(s, Game.blankState(), { handSize: s.handSize, judging: s.judging, categories: s.categories });
       return;
     }
     if (s.phase === 'lobby') return;
@@ -187,13 +220,33 @@ export class Game {
     this.s.handSize = n;
   }
 
+  setJudging(byId, mode) {
+    if (!this.isHost(byId)) fail('Only the host can change how rounds are judged.');
+    if (this.s.phase !== 'lobby') fail('The judging method can only be changed in the lobby.');
+    if (!JUDGING_MODES.includes(mode)) fail('Unknown judging method.');
+    this.s.judging = mode;
+  }
+
+  setCategories(byId, keys) {
+    if (!this.isHost(byId)) fail('Only the host can choose the categories.');
+    if (this.s.phase !== 'lobby') fail('The categories can only be changed in the lobby.');
+    const known = this.getCategories();
+    const wanted = [...new Set(Array.isArray(keys) ? keys : [])];
+    if (wanted.some((key) => !known.some((c) => c.key === key))) fail('Unknown category.');
+    if (!wanted.length) fail('Pick at least one category.');
+    this.s.categories = known.filter((c) => wanted.includes(c.key)).map((c) => c.key); // keep the standard order
+  }
+
   start(byId) {
     const s = this.s;
     if (!this.isHost(byId)) fail('Only the host can start the game.');
     if (s.phase !== 'lobby') fail('The game has already started.');
     if (s.players.length < MIN_PLAYERS) fail(`You need at least ${MIN_PLAYERS} players.`);
-    const cardIds = this.getCardIds();
-    if (cardIds.length < s.players.length * s.handSize) fail('There are not enough cards for that many players.');
+    this.normaliseSettings();
+    const cardIds = this.availableIds();
+    if (cardIds.length < s.players.length * s.handSize) {
+      fail('There are not enough cards in the chosen categories for that many players. Choose more categories.');
+    }
     s.draw = shuffle([...cardIds], this.rng);
     s.discard = [];
     for (const p of s.players) {
@@ -288,14 +341,21 @@ export class Game {
     if (s.phase !== 'voting') fail('It is not time to vote.');
     const voter = this.requirePlayer(id);
     if (voter.waiting) fail('You are waiting for the next round.');
+    if (s.judging === 'chooser' && id !== s.chooserId) fail('In this game only the word-chooser votes.');
     if (id === targetId) fail('You cannot vote for yourself.');
     if (!this.cardPlayers().some((p) => p.id === targetId)) fail('You can only vote for someone who played a card.');
     s.votes[id] = targetId;
-    if (this.inRound().every((p) => p.id in s.votes)) this.resolveVotes();
+    if (this.voters().every((p) => p.id in s.votes)) this.resolveVotes();
+  }
+
+  /** The players whose votes are needed before the round can end. */
+  voters() {
+    return this.s.judging === 'chooser' ? this.inRound().filter((p) => p.id === this.s.chooserId) : this.inRound();
   }
 
   resolveVotes() {
     const s = this.s;
+    if (s.judging === 'chooser') return this.resolveChooserVerdict();
     const tally = Object.fromEntries(this.cardPlayers().map((p) => [p.id, 0]));
     for (const target of Object.values(s.votes)) tally[target]++;
 
@@ -315,7 +375,22 @@ export class Game {
     }
     for (const p of this.inRound()) p.score += deltas[p.id];
 
-    s.results = { imposterId: s.imposterId, groupCorrect, tally, deltas, votes: { ...s.votes } };
+    s.results = { judging: 'everyone', imposterId: s.imposterId, groupCorrect, tally, deltas, votes: { ...s.votes } };
+    s.phase = 'results';
+  }
+
+  /** Chooser-only judging: spot the imposter and the chooser scores; get fooled and the imposter scores big. */
+  resolveChooserVerdict() {
+    const s = this.s;
+    const accusedId = s.votes[s.chooserId];
+    const groupCorrect = accusedId === s.imposterId; // here it means "the judge was correct"
+    const deltas = Object.fromEntries(this.inRound().map((p) => [p.id, 0]));
+    if (groupCorrect) deltas[s.chooserId] = CHOOSER_CORRECT_POINTS;
+    else deltas[s.imposterId] = CHOOSER_FOOLED_POINTS;
+    for (const p of this.inRound()) p.score += deltas[p.id];
+
+    const tally = Object.fromEntries(this.cardPlayers().map((p) => [p.id, p.id === accusedId ? 1 : 0]));
+    s.results = { judging: 'chooser', imposterId: s.imposterId, accusedId, groupCorrect, tally, deltas, votes: { ...s.votes } };
     s.phase = 'results';
   }
 
@@ -356,6 +431,17 @@ export class Game {
       hostId: s.hostId,
       minPlayers: MIN_PLAYERS,
       pointsPerVote: POINTS_PER_VOTE,
+      pointsChooserCorrect: CHOOSER_CORRECT_POINTS,
+      pointsFooledChooser: CHOOSER_FOOLED_POINTS,
+      judging: s.judging,
+      categories: this.getCategories().map((c) => ({
+        key: c.key,
+        label: c.label,
+        description: c.description ?? '',
+        count: c.ids.length,
+        selected: s.categories.includes(c.key),
+      })),
+      availableCards: this.availableIds().length,
       drawCount: s.draw.length,
       discardCount: s.discard.length,
       word,
@@ -380,7 +466,10 @@ export class Game {
         hasVoted: s.phase === 'voting' ? p.id in s.votes : false,
       })),
       table: cardsOnTable,
-      voteTargets: s.phase === 'voting' ? this.cardPlayers().filter((p) => p.id !== id).map((p) => p.id) : [],
+      voteTargets:
+        s.phase === 'voting' && this.voters().some((v) => v.id === id)
+          ? this.cardPlayers().filter((p) => p.id !== id).map((p) => p.id)
+          : [],
       results: s.phase === 'results' ? s.results : null,
     };
   }

@@ -10,12 +10,13 @@ import { Game, GameError } from './game.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT) || 3000;
-const cardsDir = path.join(root, 'cards');
+const cardsDir = process.env.CARDS_DIR ? path.resolve(process.env.CARDS_DIR) : path.join(root, 'cards');
 const distDir = path.join(root, 'dist');
 const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(root, 'data');
 const stateFile = path.join(dataDir, 'game-state.json');
 const hintsFile = path.resolve(root, '..', 'hints.txt');
 
+/** Ids of every card that has a web-sized image on disk. */
 function getCardIds() {
   const dir = path.join(cardsDir, 'medium');
   if (!fs.existsSync(dir)) return [];
@@ -25,6 +26,32 @@ function getCardIds() {
     .filter(Boolean)
     .map((m) => Number(m[1]))
     .sort((a, b) => a - b);
+}
+
+/**
+ * The cards grouped into categories. cards/categories.json (written by tools/optimise_cards.py) lists the
+ * categories; only cards whose image exists are offered. Without that file every card is one "All cards" category.
+ */
+let categoryCache = { at: 0, value: [] };
+function getCategories() {
+  if (Date.now() - categoryCache.at < 5000) return categoryCache.value;
+  const present = new Set(getCardIds());
+  let defined = null;
+  try {
+    defined = JSON.parse(fs.readFileSync(path.join(cardsDir, 'categories.json'), 'utf8')).categories;
+  } catch {
+    // no categories file
+  }
+  let value;
+  if (!Array.isArray(defined)) {
+    value = present.size ? [{ key: 'all', label: 'All cards', description: '', ids: [...present] }] : [];
+  } else {
+    value = defined
+      .map((c) => ({ key: c.key, label: c.label, description: c.description ?? '', ids: c.ids.filter((id) => present.has(id)) }))
+      .filter((c) => c.ids.length);
+  }
+  categoryCache = { at: Date.now(), value };
+  return value;
 }
 
 function loadHints() {
@@ -45,7 +72,7 @@ function loadSavedState() {
   }
 }
 
-const game = new Game({ getCardIds, hints: loadHints(), saved: loadSavedState() });
+const game = new Game({ getCategories, hints: loadHints(), saved: loadSavedState() });
 
 let saveTimer = null;
 function scheduleSave() {
@@ -156,6 +183,8 @@ io.on('connection', (socket) => {
     socket.emit('state', null);
   });
   action(socket, 'setHandSize', (player, { size }) => game.setHandSize(player.id, size));
+  action(socket, 'setJudging', (player, { mode }) => game.setJudging(player.id, mode));
+  action(socket, 'setCategories', (player, { keys }) => game.setCategories(player.id, keys));
   action(socket, 'start', (player) => game.start(player.id));
   action(socket, 'endGame', (player) => game.returnToLobby(player.id));
   action(socket, 'hints', () => ({ hints: game.nextHints(3) }));
@@ -169,6 +198,7 @@ io.on('connection', (socket) => {
 
 server.listen(PORT, () => {
   console.log(`Imposter Dixit listening on http://localhost:${PORT}`);
-  console.log(`${getCardIds().length} cards available, ${game.hints.length} hints.`);
+  const categories = getCategories();
+  console.log(`${getCardIds().length} cards in ${categories.length} categories, ${game.hints.length} hints.`);
   if (!fs.existsSync(distDir)) console.log('No client build found. Run "npm run build", or use "npm run dev".');
 });
