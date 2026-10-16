@@ -15,9 +15,22 @@ const votersFor = (playerId) =>
     .map(([voter]) => nameOf(voter));
 
 function voteSummary(playerId) {
+  if (results.value.judging === 'favourite') return '';
   const count = results.value.tally[playerId];
   const names = votersFor(playerId);
   return `${count} vote${count === 1 ? '' : 's'}${names.length ? `: ${names.join(', ')}` : ''}`;
+}
+
+/** Votes in the 'everyone' style can be changed, but a chooser's decision ends the round, so ask first. */
+function castVote(playerId) {
+  if (state.value.judging !== 'everyone') {
+    const question =
+      state.value.judging === 'favourite'
+        ? `Pick ${nameOf(playerId)}’s card as your favourite? This ends the round.`
+        : `Decide that ${nameOf(playerId)} was in the dark? This ends the round.`;
+    if (!window.confirm(question)) return;
+  }
+  send('vote', { targetId: playerId });
 }
 
 function zoom(cardId) {
@@ -37,11 +50,13 @@ const canVoteFor = (playerId) => voting.value && state.value.voteTargets.include
         mine: entry.playerId === state.me.id,
         chosen: voting && state.me.myVote === entry.playerId,
         imposter: results && results.imposterId === entry.playerId,
+        winner: results && results.winnerId === entry.playerId,
       }"
     >
       <button class="art" :aria-label="`Look closer at ${nameOf(entry.playerId)}'s card`" @click="zoom(entry.cardId)">
         <CardImg :card-id="entry.cardId" />
         <span v-if="results && results.imposterId === entry.playerId" class="stamp">Imposter</span>
+        <span v-else-if="results && results.winnerId === entry.playerId" class="stamp favourite">Favourite</span>
       </button>
       <figcaption>
         <strong>{{ nameOf(entry.playerId) }}<span v-if="entry.playerId === state.me.id" class="muted"> (you)</span></strong>
@@ -50,9 +65,9 @@ const canVoteFor = (playerId) => voting.value && state.value.voteTargets.include
           <button
             v-if="canVoteFor(entry.playerId)"
             :class="{ primary: state.me.myVote === entry.playerId }"
-            @click="send('vote', { targetId: entry.playerId })"
+            @click="castVote(entry.playerId)"
           >
-            {{ state.me.myVote === entry.playerId ? 'Your vote' : 'Vote' }}
+            {{ state.me.myVote === entry.playerId ? 'Your pick' : state.judging === 'favourite' ? 'Pick this one' : 'Vote' }}
           </button>
         </template>
 
@@ -98,6 +113,13 @@ const canVoteFor = (playerId) => voting.value && state.value.voteTargets.include
 }
 .imposter .art {
   border-color: var(--rust);
+}
+.winner .art {
+  border-color: var(--moss);
+}
+.stamp.favourite {
+  background: var(--moss);
+  color: #10200f;
 }
 .stamp {
   position: absolute;

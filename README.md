@@ -7,28 +7,39 @@ no logins: everyone just opens the page and types a name.
 
 1. The chooser (rotating in join order) types a word or phrase. A **hint** button offers three suggestions
    from `../hints.txt`.
-2. Everyone else sees it, **except one random player** who sees `???`. That player is the imposter.
-3. Everyone except the chooser plays one card from their hand.
-4. All cards and the real word are revealed (with the players' names). The group talks it through, and
-   anyone can vote straight away.
-5. Everyone, including the chooser and the imposter, votes for who they think the imposter was. You can't
-   vote for yourself or for the chooser. Votes can be changed until the last one is in; the round ends once
-   everyone has voted.
-6. Scoring:
-   - **Group correct** (the imposter has *strictly* the most votes): each player who voted for them scores 100.
-   - **Group wrong** (anything else, so a tie counts as wrong): the imposter scores 100 for every other player who didn't vote for them.
-7. Played cards are discarded, everyone draws back up to the hand size (default 8, set by the host in the
-   lobby), and the next player chooses the word. When the draw pile runs out, the discard pile is reshuffled.
+2. Everyone else sees it and plays one card from their hand that fits it. (In the two imposter styles one
+   random player sees `???` instead and has to bluff.)
+3. All cards and the real word are revealed (with the players' names). The group talks it through.
+4. The round is judged according to the **play style** the host picked in the lobby:
 
-Players who join mid-round wait for the next round. The host can remove players, skip a round (no points)
-or end the game. If someone's browser disconnects they can reopen the page and carry on (their browser
-remembers them).
+   | Play style | Who decides | Scoring |
+   | --- | --- | --- |
+   | **Everyone votes** (imposter) | Every player votes for who they think was in the dark. Votes can be changed until the last one is in. You can't vote for yourself or the chooser. | The imposter must have *strictly the most votes* for the group to be right (a tie counts as wrong). Right: each player who voted for the imposter scores 100. Wrong: the imposter scores 100 for every other player who didn't vote for them. |
+   | **Only the chooser decides** (imposter) | Only the chooser guesses who was in the dark. | Right: the chooser scores 100. Fooled: the imposter scores 500. |
+   | **Favourite card** (no imposter) | Everybody sees the word. The chooser picks the card they like best. | The player who played it scores 200. |
+
+   In the two chooser styles the chooser's pick ends the round immediately, so the browser asks them to
+   confirm it first.
+5. Played cards are discarded, everyone draws back up to the hand size (default 8, set by the host), and the
+   next player chooses the word. When the draw pile runs out, the discard pile is reshuffled.
+
+**Length:** the host sets how many times each player chooses the word (1 to 10, default 2). The game ends once
+everyone has chosen that many times, then shows the final scores and the winner (or winners, if tied). Only
+completed rounds count as a turn, so a skipped round doesn't use anyone's turn up. Anyone who joins late still
+gets their turns, which makes the game longer.
+
+**Categories:** cards come in categories (Fantasy, Fairy tales, Modern world, Sci-fi, Steampunk & Victorian,
+Medieval, Games, Food). The host ticks which ones go into the deck when setting up the game.
+
+Players who join mid-round wait for the next round. The host can remove players, skip a round (no points) or
+end the game. If someone's browser disconnects they can reopen the page and carry on (their browser remembers
+them).
 
 ## Running it
 
 ```
 npm install
-..\.venv\Scripts\python.exe tools\optimise_cards.py   # make web-sized copies of ../cards (re-run any time)
+..\.venv\Scripts\python.exe tools\optimise_cards.py   # build the game's card images from the judged winners
 npm run build                                          # build the client
 npm start                                              # http://localhost:3000
 ```
@@ -38,9 +49,16 @@ that port (e.g. with a tunnelling tool such as Cloudflare Tunnel or ngrok). Set 
 
 For development run `npm run dev` (server on 3000, Vite with hot reload on 5173).
 
-Game state is saved to `data/game-state.json`, so restarting the server doesn't lose scores or hands. New
-cards found in `cards/medium` are added to the deck whenever a game starts or a round begins.
-Delete `data/game-state.json` to wipe the game.
+Game state is saved to `data/game-state.json`, so restarting the server doesn't lose scores or hands. Delete
+that file to wipe the game. The server reads the card folder (`cards/`, or `CARDS_DIR`) at startup and again
+every few seconds, so new cards appear in the lobby without a restart.
+
+### Cards
+
+`tools/optimise_cards.py` reads the judged winners (`../choices/`) and the candidate images (`../raw/`) and writes
+`cards/small/`, `cards/medium/` and `cards/categories.json`. See `../STYLE_GUIDE.md` and `../JUDGING.md` for how
+the cards are generated and chosen. Useful options: `--unjudged a` (preview with candidate A wherever nothing is
+judged yet), `--min-fit 1` (leave out cards that still don't fit their prompt) and `--only fantasy,food`.
 
 ## Bots
 
@@ -55,21 +73,22 @@ npm run bot -- --help
 ```
 
 It picks a word from the game's own word list when it is the chooser, plays a random card from its hand,
-and votes for a random player. It waits a random 1 to 4 seconds before each action so it doesn't act
-instantly (`--delay MIN-MAX` to change that). It does not start the game or press "Next round", so a human
-still does those. A bot remembers its identity in `bots/.bot-tokens.json`, so restarting a bot with the
-same name rejoins as the same player. Stopping it (Ctrl+C) leaves the player in the game, shown as offline;
-the host can remove it.
+and votes for a random player (when the play style lets it vote). It waits a random 1 to 4 seconds before each
+action so it doesn't act instantly (`--delay MIN-MAX` to change that). It does not start the game or press
+"Next round", so a human still does those. A bot remembers its identity in `bots/.bot-tokens.json`, so
+restarting a bot with the same name rejoins as the same player. Stopping it (Ctrl+C) leaves the player in the
+game, shown as offline; the host can remove it.
 
 ## Tests
 
-`npm test` runs the rules tests (`server/game.test.js`) and an end-to-end test that plays full rounds with
-real socket clients against a real server (`server/e2e.test.js`).
+`npm test` runs the rules tests (`server/*.test.js`) and end-to-end tests that play full games with real socket
+clients and real bot processes against a real server, using a small set of fake cards (`server/e2e.test.js`).
 
 ## Layout
 
 - `server/game.js` pure rules and what each player is allowed to see (the server never sends the imposter,
   other hands or the word to anyone who shouldn't have it).
-- `server/index.js` Express and Socket.IO wiring plus saving.
+- `server/index.js` Express and Socket.IO wiring, categories, and saving.
 - `src/` the Vue client (`store.js` holds the socket and state; `components/` has one component per screen).
-- `tools/optimise_cards.py` creates `cards/small` and `cards/medium` JPEGs from the generated PNGs.
+- `bots/bot.js` the stand-alone bot player.
+- `tools/optimise_cards.py` builds `cards/` from the judged images.

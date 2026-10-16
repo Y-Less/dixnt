@@ -11,6 +11,9 @@ const banner = computed(() => {
       return { big: '???', note: 'You didn’t get to see the word. Play a card that could fit, and blend in.', dark: true };
     }
     if (s.me.isChooser) return { big: s.word, note: 'This is your word. Waiting for everyone to play a card.' };
+    if (s.judging === 'favourite') {
+      return { big: s.word, note: 'Play the card that fits it best. The chooser will pick their favourite.' };
+    }
     return { big: s.word, note: 'One player can’t see this word. Play the card that fits it best.' };
   }
   if (['voting', 'results'].includes(s.phase)) {

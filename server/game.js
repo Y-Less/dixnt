@@ -7,12 +7,14 @@
 //               (changing their vote until the last vote is in). The round ends once everyone has voted.
 //   results     the imposter is revealed and points are awarded
 //
-// Two judging methods, chosen by the host in the lobby:
+// Three play styles (the 'judging' setting), chosen by the host in the lobby:
 //   'everyone'  every player votes. The group is correct only if the imposter has strictly the most votes (a tie
 //               counts as wrong). If correct, each player who voted for the imposter scores POINTS_PER_VOTE. If
 //               wrong, the imposter scores POINTS_PER_VOTE for each other player who didn't vote for them.
 //   'chooser'   only the word-chooser votes. If they spot the imposter the chooser scores
 //               CHOOSER_CORRECT_POINTS; if they are fooled the imposter scores CHOOSER_FOOLED_POINTS.
+//   'favourite' no imposter: everybody sees the word, and the chooser just picks the card they like best. The
+//               player who played it scores FAVOURITE_POINTS.
 //
 // The deck is built from the categories the host selects (cards come in categories; see getCategories below).
 //
@@ -22,7 +24,8 @@
 export const POINTS_PER_VOTE = 100;
 export const CHOOSER_CORRECT_POINTS = 100;
 export const CHOOSER_FOOLED_POINTS = 500;
-export const JUDGING_MODES = ['everyone', 'chooser'];
+export const FAVOURITE_POINTS = 200;
+export const JUDGING_MODES = ['everyone', 'chooser', 'favourite'];
 export const MIN_ROUNDS_EACH = 1;
 export const MAX_ROUNDS_EACH = 10;
 export const DEFAULT_ROUNDS_EACH = 2;
@@ -357,7 +360,8 @@ export class Game {
     if (clean.length > MAX_WORD_LENGTH) fail(`Keep it to ${MAX_WORD_LENGTH} characters or fewer.`);
     const candidates = this.cardPlayers();
     s.word = clean;
-    s.imposterId = candidates[Math.floor(this.rng() * candidates.length)].id;
+    // In the favourite style nobody is kept in the dark, so there is no imposter.
+    s.imposterId = s.judging === 'favourite' ? null : candidates[Math.floor(this.rng() * candidates.length)].id;
     s.phase = 'picking';
   }
 
@@ -380,7 +384,7 @@ export class Game {
     if (s.phase !== 'voting') fail('It is not time to vote.');
     const voter = this.requirePlayer(id);
     if (voter.waiting) fail('You are waiting for the next round.');
-    if (s.judging === 'chooser' && id !== s.chooserId) fail('In this game only the word-chooser votes.');
+    if (s.judging !== 'everyone' && id !== s.chooserId) fail('In this game only the word-chooser votes.');
     if (id === targetId) fail('You cannot vote for yourself.');
     if (!this.cardPlayers().some((p) => p.id === targetId)) fail('You can only vote for someone who played a card.');
     s.votes[id] = targetId;
@@ -389,12 +393,13 @@ export class Game {
 
   /** The players whose votes are needed before the round can end. */
   voters() {
-    return this.s.judging === 'chooser' ? this.inRound().filter((p) => p.id === this.s.chooserId) : this.inRound();
+    return this.s.judging === 'everyone' ? this.inRound() : this.inRound().filter((p) => p.id === this.s.chooserId);
   }
 
   resolveVotes() {
     const s = this.s;
     if (s.judging === 'chooser') return this.resolveChooserVerdict();
+    if (s.judging === 'favourite') return this.resolveFavourite();
     const tally = Object.fromEntries(this.cardPlayers().map((p) => [p.id, 0]));
     for (const target of Object.values(s.votes)) tally[target]++;
 
@@ -430,6 +435,19 @@ export class Game {
 
     const tally = Object.fromEntries(this.cardPlayers().map((p) => [p.id, p.id === accusedId ? 1 : 0]));
     s.results = { judging: 'chooser', imposterId: s.imposterId, accusedId, groupCorrect, tally, deltas, votes: { ...s.votes } };
+    this.completeRound();
+  }
+
+  /** Favourite style: the chooser's favourite card scores, and nobody was bluffing. */
+  resolveFavourite() {
+    const s = this.s;
+    const winnerId = s.votes[s.chooserId];
+    const deltas = Object.fromEntries(this.inRound().map((p) => [p.id, 0]));
+    deltas[winnerId] = FAVOURITE_POINTS;
+    for (const p of this.inRound()) p.score += deltas[p.id];
+
+    const tally = Object.fromEntries(this.cardPlayers().map((p) => [p.id, p.id === winnerId ? 1 : 0]));
+    s.results = { judging: 'favourite', imposterId: null, winnerId, groupCorrect: null, tally, deltas, votes: { ...s.votes } };
     this.completeRound();
   }
 
@@ -507,6 +525,7 @@ export class Game {
       pointsPerVote: POINTS_PER_VOTE,
       pointsChooserCorrect: CHOOSER_CORRECT_POINTS,
       pointsFooledChooser: CHOOSER_FOOLED_POINTS,
+      pointsFavourite: FAVOURITE_POINTS,
       judging: s.judging,
       categories: this.getCategories().map((c) => ({
         key: c.key,

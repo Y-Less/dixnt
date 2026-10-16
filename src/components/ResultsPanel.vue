@@ -20,22 +20,31 @@ const nextChooser = computed(() => {
 <template>
   <WordBanner />
 
-  <section class="panel stack verdict" :class="results.groupCorrect ? 'caught' : 'escaped'">
-    <h2>{{ nameOf(results.imposterId) }} was the imposter!</h2>
-    <template v-if="results.judging === 'chooser'">
-      <p v-if="results.groupCorrect">
-        {{ nameOf(chooserId) }} guessed right and scores {{ state.pointsChooserCorrect }}.
-      </p>
-      <p v-else>
-        {{ nameOf(chooserId) }} was fooled! {{ nameOf(results.imposterId) }} scores {{ state.pointsFooledChooser }}.
-      </p>
+  <section class="panel stack verdict" :class="results.groupCorrect !== false ? 'caught' : 'escaped'">
+    <!-- Favourite style: nobody was bluffing, the chooser just picked a card -->
+    <template v-if="results.judging === 'favourite'">
+      <h2>{{ nameOf(chooserId) }} picked {{ nameOf(results.winnerId) }}’s card!</h2>
+      <p>{{ nameOf(results.winnerId) }} scores {{ state.pointsFavourite }}.</p>
     </template>
+
+    <!-- Imposter styles -->
     <template v-else>
-      <p v-if="results.groupCorrect">The group found them. Everyone who voted for them scores {{ state.pointsPerVote }}.</p>
-      <p v-else>
-        The group was fooled! {{ nameOf(results.imposterId) }} scores {{ gained(results.imposterId) }}
-        ({{ state.pointsPerVote }} for each player who missed them).
-      </p>
+      <h2>{{ nameOf(results.imposterId) }} was the imposter!</h2>
+      <template v-if="results.judging === 'chooser'">
+        <p v-if="results.groupCorrect">
+          {{ nameOf(chooserId) }} guessed right and scores {{ state.pointsChooserCorrect }}.
+        </p>
+        <p v-else>
+          {{ nameOf(chooserId) }} was fooled! {{ nameOf(results.imposterId) }} scores {{ state.pointsFooledChooser }}.
+        </p>
+      </template>
+      <template v-else>
+        <p v-if="results.groupCorrect">The group found them. Everyone who voted for them scores {{ state.pointsPerVote }}.</p>
+        <p v-else>
+          The group was fooled! {{ nameOf(results.imposterId) }} scores {{ gained(results.imposterId) }}
+          ({{ state.pointsPerVote }} for each player who missed them).
+        </p>
+      </template>
     </template>
   </section>
 

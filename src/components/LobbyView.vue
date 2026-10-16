@@ -19,6 +19,11 @@ const judgingOptions = computed(() => [
     title: 'Only the chooser decides',
     text: `Only the word-chooser guesses who was in the dark. Guess right and the chooser scores ${state.value.pointsChooserCorrect}. Get fooled and the imposter scores ${state.value.pointsFooledChooser}.`,
   },
+  {
+    mode: 'favourite',
+    title: 'Favourite card (no imposter)',
+    text: `Everybody sees the word and nobody has to bluff. The chooser picks the card they like best, and the player who played it scores ${state.value.pointsFavourite}.`,
+  },
 ]);
 const currentJudging = computed(() => judgingOptions.value.find((o) => o.mode === state.value.judging));
 
@@ -47,9 +52,9 @@ async function copyLink() {
   </section>
 
   <section class="panel stack">
-    <h2>Judging</h2>
+    <h2>Play style</h2>
     <template v-if="isHost">
-      <div class="options" role="radiogroup" aria-label="Judging method">
+      <div class="options" role="radiogroup" aria-label="Play style">
         <label v-for="option in judgingOptions" :key="option.mode" class="option" :class="{ on: state.judging === option.mode }">
           <input
             type="radio"
@@ -142,10 +147,12 @@ async function copyLink() {
     <h3>How it works</h3>
     <ol>
       <li>Each round one player thinks of a word or phrase and types it in.</li>
-      <li>Everyone else sees it, except one random player who just sees ???.</li>
-      <li>They all play the card from their hand that best fits the word. The player in the dark has to bluff.</li>
+      <li v-if="state.judging === 'favourite'">Everyone else sees it and plays the card from their hand that best fits the word.</li>
+      <li v-else>Everyone else sees it, except one random player who just sees ???.</li>
+      <li v-if="state.judging !== 'favourite'">They all play the card from their hand that best fits the word. The player in the dark has to bluff.</li>
       <li>The cards and the word are revealed. Talk it through and justify your choices.</li>
-      <li>Then the vote: {{ state.judging === 'chooser' ? 'the chooser decides who they think was in the dark.' : 'everyone votes for who they think was in the dark.' }}</li>
+      <li v-if="state.judging === 'favourite'">Then the chooser picks their favourite card, and that player scores {{ state.pointsFavourite }}.</li>
+      <li v-else>Then the vote: {{ state.judging === 'chooser' ? 'the chooser decides who they think was in the dark.' : 'everyone votes for who they think was in the dark.' }}</li>
     </ol>
   </section>
 </template>

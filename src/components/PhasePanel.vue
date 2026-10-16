@@ -38,7 +38,22 @@ const waitingOnVotes = computed(() => inRound.value.filter((p) => !p.hasVoted));
   <!-- 3. Cards revealed: talk it through and vote whenever you like -->
   <template v-else-if="state.phase === 'voting'">
     <WordBanner />
-    <section v-if="state.judging === 'chooser'" class="panel stack">
+    <section v-if="state.judging === 'favourite'" class="panel stack">
+      <h2>{{ state.me.isChooser ? 'Which card do you like best?' : `${chooser?.name} will pick their favourite` }}</h2>
+      <p v-if="state.me.isChooser" class="muted">
+        Listen to everyone explain why their card fits the word, then pick the one you like best. That player scores
+        {{ state.pointsFavourite }}.
+      </p>
+      <p v-else class="muted">
+        Explain why your card fits the word. If {{ chooser?.name }} picks yours you score {{ state.pointsFavourite }}.
+      </p>
+      <p class="status">
+        <template v-if="state.me.isChooser && state.me.myVote === null">You haven’t picked yet.</template>
+        <template v-else-if="state.me.isChooser">You’ve picked.</template>
+        <template v-else>Waiting for {{ chooser?.name }} to choose…</template>
+      </p>
+    </section>
+    <section v-else-if="state.judging === 'chooser'" class="panel stack">
       <h2>{{ state.me.isChooser ? 'Who was in the dark?' : `${chooser?.name} will decide who was in the dark` }}</h2>
       <p v-if="state.me.isChooser" class="muted">
         Listen to everyone explain their card, then pick the player you think didn’t see the word. Guess right and you

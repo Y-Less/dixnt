@@ -242,14 +242,14 @@ async function playBotGame(t, { judging, categories }) {
 
     if (human.state.phase === 'voting' && human.state.voteTargets.length) {
       assert.equal((await human.call('vote', { targetId: human.state.voteTargets[0] })).ok, true);
-    } else if (judging === 'chooser') {
+    } else if (judging !== 'everyone') {
       const refused = await human.call('vote', { targetId: human.state.players.find((p) => !p.isChooser && p.id !== human.state.me.id)?.id });
-      if (human.state.phase === 'voting') assert.equal(refused.ok, false, 'a non-chooser cannot vote in chooser-only judging');
+      if (human.state.phase === 'voting') assert.equal(refused.ok, false, 'a non-chooser cannot vote in the chooser-decides styles');
     }
     await until(() => human.state.phase === 'results', 'the verdict');
     const { results } = human.state;
     assert.equal(results.judging, judging);
-    assert.equal(Object.keys(results.votes).length, judging === 'chooser' ? 1 : 4);
+    assert.equal(Object.keys(results.votes).length, judging === 'everyone' ? 4 : 1);
     resultsSeen.push(results);
     if (round === 1) assert.equal((await human.call('nextRound')).ok, true);
   }
@@ -258,11 +258,17 @@ async function playBotGame(t, { judging, categories }) {
   assert.match(log, /played card \d+/);
   if (judging === 'everyone') assert.match(log, /voted for /);
   else {
-    // In chooser-only judging a bot only votes in the round it is the chooser, and the points are 100 or 500.
+    // When only the chooser decides, a bot votes only in the round it is the chooser, one player scores per round,
+    // and the award depends on the style.
+    const allowed = judging === 'favourite' ? [200] : [100, 500];
     for (const r of resultsSeen) {
       const gained = Object.values(r.deltas).filter(Boolean);
-      assert.equal(gained.length <= 1, true, 'only one player scores in chooser-only judging');
-      assert.ok(gained.length === 0 || [100, 500].includes(gained[0]));
+      assert.equal(gained.length <= 1, true, 'only one player scores in the chooser-decides styles');
+      assert.ok(gained.length === 0 || allowed.includes(gained[0]), `award ${gained[0]} is one of ${allowed}`);
+      if (judging === 'favourite') {
+        assert.equal(gained.length, 1, 'a favourite is always chosen');
+        assert.equal(r.imposterId, null, 'there is no imposter');
+      }
     }
   }
   assert.match(log, /chose the word "/, 'a bot picked a word from the hint list when it was the chooser');
@@ -273,3 +279,6 @@ test('external bot processes play whole rounds using only the API (everyone vote
 
 test('external bot processes play whole rounds in chooser-only judging, with one category', (t) =>
   playBotGame(t, { judging: 'chooser', categories: ['beta'] }));
+
+test('external bot processes play the favourite style: everyone sees the word, the chosen card scores 200', (t) =>
+  playBotGame(t, { judging: 'favourite', categories: ['alpha'] }));
