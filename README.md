@@ -1,7 +1,20 @@
 # Imposter Dixit
 
-A Dixit-style card game for friends, built with Vue 3 and a Node/Socket.IO server. One game at a time,
-no logins: everyone just opens the page and types a name.
+A Dixit-style card game for friends, built with Vue 3 and a Node/Socket.IO server. No logins: everyone just
+opens the page and types a name.
+
+## Starting and joining games
+
+Any number of games can run at once. Each game has an invite code made of three words from the hint list, such as
+`boss-aware-you`, and a matching invite link, `/invite?boss-aware-you`.
+
+- **Start a new game** from the home page (you become its host).
+- **Join with the link:** open `/invite?boss-aware-you`, type a name and join.
+- **Join with the code:** type the code into the box on the home page. Capitals, spaces and pasted links are fine.
+
+The code and a copy-link button are shown in the game's header and lobby. A browser remembers which game it was in,
+so reopening the page puts you back. A game closes when its last player leaves, and games nobody has touched for
+two weeks are forgotten.
 
 ## How a round works
 
@@ -49,8 +62,9 @@ that port (e.g. with a tunnelling tool such as Cloudflare Tunnel or ngrok). Set 
 
 For development run `npm run dev` (server on 3000, Vite with hot reload on 5173).
 
-Game state is saved to `data/game-state.json`, so restarting the server doesn't lose scores or hands. Delete
-that file to wipe the game. The server reads the card folder (`cards/`, or `CARDS_DIR`) at startup and again
+Game state is saved to `data/games.json`, so restarting the server doesn't lose scores or hands. Delete that
+file to wipe every game. (A single game saved by an older version in `data/game-state.json` is moved into the new
+format under a fresh code the first time the server starts.) The server reads the card folder (`cards/`, or `CARDS_DIR`) at startup and again
 every few seconds, so new cards appear in the lobby without a restart.
 
 ### Cards
@@ -64,11 +78,12 @@ judged yet), `--min-fit 1` (leave out cards that still don't fit their prompt) a
 
 `bots/bot.js` is a stand-alone bot player. It is a separate process that uses only the same Socket.IO API
 as the browser, so it can run on any machine that can reach the server, and you can run as many as you like
-(one process per bot, each with its own name):
+(one process per bot, each with its own name). A bot can only join an existing game, with `--join` and the
+game's invite code:
 
 ```
-npm run bot -- --name Robin
-npm run bot -- --name Sam --url http://192.168.1.20:3000
+npm run bot -- --join boss-aware-you --name Robin
+npm run bot -- --join boss-aware-you --name Sam --url http://192.168.1.20:3000
 npm run bot -- --help
 ```
 
@@ -76,7 +91,7 @@ It picks a word from the game's own word list when it is the chooser, plays a ra
 and votes for a random player (when the play style lets it vote). It waits a random 1 to 4 seconds before each
 action so it doesn't act instantly (`--delay MIN-MAX` to change that). It does not start the game or press
 "Next round", so a human still does those. A bot remembers its identity in `bots/.bot-tokens.json`, so
-restarting a bot with the same name rejoins as the same player. Stopping it (Ctrl+C) leaves the player in the
+restarting a bot with the same name and code rejoins as the same player. Stopping it (Ctrl+C) leaves the player in the
 game, shown as offline; the host can remove it.
 
 ## Tests

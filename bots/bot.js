@@ -1,8 +1,8 @@
 // A stand-alone bot player. It is a completely separate process that talks to the game server over the
 // same Socket.IO API as the browser client, so you can run as many as you like.
 //
-//   npm run bot -- --name Robin
-//   node bots/bot.js --name Robin --url http://192.168.1.20:3000
+//   npm run bot -- --join boss-aware-you --name Robin
+//   node bots/bot.js --join boss-aware-you --name Robin --url http://192.168.1.20:3000
 //
 // Behaviour:
 //   - when it is the chooser it asks the server for hint words (the game's own word list) and picks one
@@ -19,6 +19,7 @@ import { io } from 'socket.io-client';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const { values: options } = parseArgs({
   options: {
+    join: { type: 'string', short: 'j' }, // the game's invite code, e.g. boss-aware-you
     name: { type: 'string', short: 'n' },
     url: { type: 'string', short: 'u', default: 'http://localhost:3000' },
     delay: { type: 'string', short: 'd', default: '1000-4000' }, // min-max milliseconds to "think" for
@@ -28,14 +29,21 @@ const { values: options } = parseArgs({
 });
 
 if (options.help) {
-  console.log(`Usage: node bots/bot.js [--name NAME] [--url URL] [--delay MIN-MAX] [--token-file FILE]
+  console.log(`Usage: node bots/bot.js --join CODE [--name NAME] [--url URL] [--delay MIN-MAX] [--token-file FILE]
 
+  --join        the invite code of the game to join, e.g. boss-aware-you (required)
   --name        the bot's player name (default: Bot-<random number>)
   --url         the game server (default: http://localhost:3000)
   --delay       how long to "think" before acting, in ms, as MIN-MAX (default: 1000-4000)
   --token-file  where to remember each bot's identity, so a restarted bot rejoins as the same player`);
   process.exit(0);
 }
+
+if (!options.join) {
+  console.error('Please say which game to join, e.g. --join boss-aware-you (the invite code is shown in the lobby).');
+  process.exit(1);
+}
+const code = options.join;
 
 const name = options.name ?? `Bot-${Math.floor(100 + Math.random() * 900)}`;
 const [minDelay, maxDelay] = options.delay.split('-').map(Number);
@@ -75,13 +83,13 @@ let acting = false; // only one decision at a time
 const decided = new Set(); // "round:phase" keys we have already acted on, so a state refresh can't make us act twice
 
 async function connect() {
-  let reply = await call('resume', { token });
-  if (!reply.ok) reply = await call('join', { token, name });
+  let reply = await call('resume', { code, token });
+  if (!reply.ok) reply = await call('join', { code, token, name });
   if (!reply.ok) {
     log(`could not join: ${reply.error}`);
     process.exit(1);
   }
-  log(`in the game (${options.url})`);
+  log(`in the game ${reply.code} (${options.url})`);
 }
 
 socket.on('connect', connect);

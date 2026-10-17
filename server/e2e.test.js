@@ -44,6 +44,7 @@ class Bot {
     this.name = name;
     this.token = `${name}-`.padEnd(20, 'x');
     this.state = null;
+    this.code = null;
     this.socket = connect(URL, { forceNew: true });
     this.socket.on('state', (s) => (this.state = s));
   }
@@ -53,9 +54,14 @@ class Bot {
   async connected() {
     if (!this.socket.connected) await new Promise((resolve) => this.socket.once('connect', resolve));
   }
-  async join() {
+  /** Joins the game with this code, or starts a new game (and becomes its host) when no code is given. */
+  async join(code) {
     await this.connected();
-    return this.call('join', { token: this.token, name: this.name });
+    const reply = code
+      ? await this.call('join', { code, token: this.token, name: this.name })
+      : await this.call('create', { token: this.token, name: this.name });
+    if (reply.ok) this.code = reply.code;
+    return reply;
   }
   async settle() {
     await new Promise((resolve) => setTimeout(resolve, 120));
@@ -72,10 +78,12 @@ test('four players complete two rounds over real sockets', async (t) => {
     fs.rmSync(dataDir, { recursive: true, force: true });
   });
 
-  for (const bot of bots) assert.equal((await bot.join()).ok, true);
+  assert.equal((await bots[0].join()).ok, true, 'the first player creates the game');
+  assert.match(bots[0].code, /^[a-z]+-[a-z]+-[a-z]+$/, 'the invite code is three words');
+  for (const bot of bots.slice(1)) assert.equal((await bot.join(bots[0].code)).ok, true);
   const impostor = new Bot('Ann');
   impostor.token = 'a-different-token-entirely';
-  assert.equal((await impostor.join()).ok, false, 'a different person cannot take an existing name');
+  assert.equal((await impostor.join(bots[0].code)).ok, false, 'a different person cannot take an existing name');
   impostor.socket.close();
   await bots[0].settle();
   assert.equal(bots[0].state.phase, 'lobby');
@@ -137,7 +145,7 @@ test('four players complete two rounds over real sockets', async (t) => {
   const before = bots[1].state.players.find((p) => p.id === bots[1].state.me.id).score;
   const again = new Bot('Bob');
   await again.connected();
-  assert.equal((await again.call('resume', { token: bots[1].token })).ok, true);
+  assert.equal((await again.call('resume', { code: bots[0].code, token: bots[1].token })).ok, true);
   await again.settle();
   assert.equal(again.state.me.id, bots[1].state.me.id);
   assert.equal(again.state.players.find((p) => p.id === again.state.me.id).score, before);
@@ -153,7 +161,8 @@ test('game state survives a server restart', async (t) => {
     server.kill();
     fs.rmSync(dataDir, { recursive: true, force: true });
   });
-  for (const bot of bots) await bot.join();
+  await bots[0].join();
+  for (const bot of bots.slice(1)) await bot.join(bots[0].code);
   await bots[0].call('start');
   await bots[0].settle();
   const hand = bots[1].state.me.hand;
@@ -165,7 +174,7 @@ test('game state survives a server restart', async (t) => {
   server = await startServer(dataDir);
   const bob = new Bot('Bob');
   await bob.connected();
-  assert.equal((await bob.call('resume', { token: bots[1].token })).ok, true);
+  assert.equal((await bob.call('resume', { code: bots[0].code, token: bots[1].token })).ok, true);
   await bob.settle();
   assert.equal(bob.state.phase, 'word');
   assert.deepEqual(bob.state.me.hand, hand);
@@ -200,6 +209,7 @@ async function playBotGame(t, { judging, categories }) {
   };
 
   assert.equal((await human.join()).ok, true);
+  const code = human.code;
   await until(() => human.state, 'the first state update');
   assert.deepEqual(
     human.state.categories.map((c) => [c.key, c.count, c.selected]),
@@ -212,7 +222,7 @@ async function playBotGame(t, { judging, categories }) {
   for (const name of ['Robin', 'Sam', 'Tess']) {
     const child = spawn(
       process.execPath,
-      [path.join(here, '..', 'bots', 'bot.js'), '--name', name, '--url', URL, '--delay', '0-50', '--token-file', tokenFile],
+      [path.join(here, '..', 'bots', 'bot.js'), '--join', code, '--name', name, '--url', URL, '--delay', '0-50', '--token-file', tokenFile],
       { stdio: ['ignore', 'pipe', 'inherit'] },
     );
     child.stdout.on('data', (chunk) => botLog.push(String(chunk)));
@@ -282,3 +292,79 @@ test('external bot processes play whole rounds in chooser-only judging, with one
 
 test('external bot processes play the favourite style: everyone sees the word, the chosen card scores 200', (t) =>
   playBotGame(t, { judging: 'favourite', categories: ['alpha'] }));
+
+test('several games run side by side, each with its own invite code', async (t) => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dixit-e2e-'));
+  const server = await startServer(dataDir);
+  const people = ['Ann', 'Bob', 'Cat', 'Dan', 'Eve'].map((n) => new Bot(n));
+  const [ann, bob, cat, dan, eve] = people;
+  t.after(() => {
+    people.forEach((p) => p.socket.close());
+    server.kill();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  assert.equal((await ann.join()).ok, true);
+  assert.equal((await dan.join()).ok, true);
+  assert.notEqual(ann.code, dan.code, 'every game gets its own code');
+
+  // Codes are forgiving: capitals, spaces, and the whole invite link all work.
+  const looseCode = `http://example.test/invite?${ann.code.toUpperCase()}`;
+  assert.equal((await bob.join(looseCode)).ok, true);
+  assert.equal((await cat.join(ann.code.replaceAll('-', ' '))).ok, true);
+  assert.equal((await eve.join(dan.code)).ok, true);
+  await ann.settle();
+
+  assert.deepEqual(ann.state.players.map((p) => p.name), ['Ann', 'Bob', 'Cat']);
+  assert.deepEqual(dan.state.players.map((p) => p.name), ['Dan', 'Eve']);
+  assert.equal(ann.state.code, ann.code);
+
+  // Settings in one game do not touch the other.
+  assert.equal((await ann.call('setHandSize', { size: 5 })).ok, true);
+  await dan.settle();
+  assert.equal(ann.state.handSize, 5);
+  assert.notEqual(dan.state.handSize, 5);
+  assert.equal((await bob.call('setHandSize', { size: 6 })).ok, false, 'only the host of a game can change it');
+
+  // Unknown codes are refused, and a lookup says whether a game exists.
+  const stranger = new Bot('Fay');
+  await stranger.connected();
+  assert.equal((await stranger.join('no-such-game')).ok, false);
+  assert.equal((await stranger.call('lookup', { code: `?${ann.code}` })).exists, true);
+  assert.equal((await stranger.call('lookup', { code: 'no-such-game' })).exists, false);
+  assert.equal((await stranger.call('resume', { code: dan.code, token: ann.token })).ok, false, 'a token only works in its own game');
+  stranger.socket.close();
+
+  // The last player leaving closes the game, and its code stops working.
+  assert.equal((await dan.call('leave')).ok, true);
+  assert.equal((await eve.call('leave')).ok, true);
+  const late = new Bot('Gus');
+  assert.equal((await late.join(dan.code)).ok, false, 'the game is gone');
+  late.socket.close();
+  assert.equal((await ann.call('lookup', { code: dan.code })).exists, false);
+});
+
+test('a game saved before invite codes is kept under a new code', async (t) => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dixit-e2e-'));
+  t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
+  const first = await startServer(dataDir);
+  const ann = new Bot('Ann');
+  await ann.join();
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  const saved = JSON.parse(fs.readFileSync(path.join(dataDir, 'games.json'), 'utf8'));
+  ann.socket.close();
+  first.kill();
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  // Turn the new-style file back into the old single-game one.
+  const [{ game }] = Object.values(saved.games);
+  fs.rmSync(path.join(dataDir, 'games.json'));
+  fs.writeFileSync(path.join(dataDir, 'game-state.json'), JSON.stringify(game));
+  const second = await startServer(dataDir);
+  t.after(() => second.kill());
+  const again = new Bot('Ann');
+  t.after(() => again.socket.close());
+  await again.connected();
+  assert.equal((await again.call('resume', { code: ann.code, token: ann.token })).ok, false, 'the old game has a new code');
+  assert.equal(Object.keys(saved.games).length, 1);
+});

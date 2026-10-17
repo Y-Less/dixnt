@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue';
-import { isHost, players, send, store, showToast } from '../store.js';
+import { inviteUrl, isHost, players, send, store, showToast } from '../store.js';
 
 const state = computed(() => store.state);
 const missingPlayers = computed(() => Math.max(0, state.value.minPlayers - players.value.length));
@@ -34,10 +34,10 @@ function toggleCategory(key) {
 
 async function copyLink() {
   try {
-    await navigator.clipboard.writeText(window.location.href);
+    await navigator.clipboard.writeText(inviteUrl(state.value.code));
     showToast('Link copied. Send it to your friends.');
   } catch {
-    showToast(window.location.href);
+    showToast(inviteUrl(state.value.code));
   }
 }
 </script>
@@ -45,7 +45,10 @@ async function copyLink() {
 <template>
   <section class="panel stack">
     <h2>Waiting for players</h2>
-    <p class="muted">Share this page with your friends so they can join. You need at least {{ state.minPlayers }} players.</p>
+    <p class="muted">
+      Friends can join with the game code <strong class="code">{{ state.code }}</strong> on the home page, or with your invite
+      link. You need at least {{ state.minPlayers }} players.
+    </p>
     <div class="row">
       <button @click="copyLink">Copy invite link</button>
     </div>
@@ -158,6 +161,9 @@ async function copyLink() {
 </template>
 
 <style scoped>
+.code {
+  color: var(--amber);
+}
 .num {
   width: 5rem;
 }

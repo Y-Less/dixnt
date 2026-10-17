@@ -1,8 +1,8 @@
 <script setup>
 import { computed } from 'vue';
-import { isHost, send, store } from './store.js';
+import { goHome, inviteUrl, isHost, send, showToast, store } from './store.js';
 import Hand from './components/Hand.vue';
-import JoinScreen from './components/JoinScreen.vue';
+import HomeScreen from './components/HomeScreen.vue';
 import FinishedPanel from './components/FinishedPanel.vue';
 import Lightbox from './components/Lightbox.vue';
 import LobbyView from './components/LobbyView.vue';
@@ -14,7 +14,18 @@ const state = computed(() => store.state);
 const showHand = computed(() => ['word', 'picking'].includes(state.value?.phase));
 
 async function leave() {
-  if (window.confirm('Leave the game? Your score will be lost.')) await send('leave');
+  if (!window.confirm('Leave the game? Your score will be lost.')) return;
+  await send('leave');
+  goHome();
+}
+async function copyInvite() {
+  const link = inviteUrl(state.value.code);
+  try {
+    await navigator.clipboard.writeText(link);
+    showToast('Invite link copied. Send it to your friends.');
+  } catch {
+    showToast(link);
+  }
 }
 async function endGame() {
   if (window.confirm('End the game and return everyone to the lobby? Scores are reset.')) await send('endGame');
@@ -26,11 +37,12 @@ async function skipRound() {
 
 <template>
   <div v-if="!store.checkedSession" class="splash muted">Connecting…</div>
-  <JoinScreen v-else-if="!state" />
+  <HomeScreen v-else-if="!state" />
 
   <div v-else class="game">
     <header>
       <h1>Imposter Dixit</h1>
+      <button class="quiet code" title="Copy the invite link" @click="copyInvite">{{ state.code }}</button>
       <span v-if="state.phase === 'finished'" class="muted round">Game over</span>
       <span v-else-if="state.phase !== 'lobby'" class="muted round">
         Round {{ state.round }} of {{ state.totalRounds }} · deck {{ state.drawCount }} / discard {{ state.discardCount }}
@@ -87,6 +99,9 @@ h1 {
 }
 .round {
   font-size: 0.9rem;
+}
+.code {
+  font-size: 0.85rem;
 }
 .menu {
   margin-left: auto;
