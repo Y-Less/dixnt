@@ -1,4 +1,4 @@
 node_modules/
-bots/.bot_tokens.json
+bots/.bot-tokens.json
 data/
 dist/
