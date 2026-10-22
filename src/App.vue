@@ -41,7 +41,7 @@ async function skipRound() {
 
   <div v-else class="game">
     <header>
-      <h1>Imposter Dixit</h1>
+      <h1>Dixnt</h1>
       <button class="quiet code" title="Copy the invite link" @click="copyInvite">{{ state.code }}</button>
       <span v-if="state.phase === 'finished'" class="muted round">Game over</span>
       <span v-else-if="state.phase !== 'lobby'" class="muted round">

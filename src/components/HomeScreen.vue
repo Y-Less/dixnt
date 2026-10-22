@@ -23,7 +23,7 @@ const joinTyped = () => run(() => join(name.value, typed.value));
 
 <template>
   <main class="home">
-    <h1>Imposter Dixit</h1>
+    <h1>Dixnt</h1>
     <p class="muted tagline">One of you is in the dark. Can the rest of you work out who?</p>
 
     <div class="panel stack">

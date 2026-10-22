@@ -1,4 +1,4 @@
-// Pure game rules for the imposter Dixit game. No networking in here, so it is easy to test.
+// Pure game rules for the Dixnt game. No networking in here, so it is easy to test.
 //
 // Round flow:  word -> picking -> voting -> results -> (next round) word ...
 //   word        the chooser types a word or phrase

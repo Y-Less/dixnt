@@ -317,7 +317,7 @@ io.on('connection', (socket) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Imposter Dixit listening on http://localhost:${PORT}`);
+  console.log(`Dixnt listening on http://localhost:${PORT}`);
   const categories = getCategories();
   console.log(`${getCardIds().length} cards in ${categories.length} categories, ${hints.length} hints, ${games.size} saved games.`);
   if (!fs.existsSync(distDir)) console.log('No client build found. Run "npm run build", or use "npm run dev".');

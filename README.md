@@ -1,4 +1,4 @@
-# Imposter Dixit
+# Dixnt
 
 A Dixit-style card game for friends, built with Vue 3 and a Node/Socket.IO server. No logins: everyone just
 opens the page and types a name.
