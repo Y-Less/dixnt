@@ -1,0 +1,28 @@
+services:
+  dixnt:
+    build: .
+    restart: unless-stopped
+    networks:
+      - gateway
+    volumes:
+      - ./cards:/app/cards:ro
+      - dixnt-data:/app/data
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=gateway
+      - traefik.http.routers.dixnt.entrypoints=https
+      - traefik.http.routers.dixnt.rule=Host(`dixnt.y-less.com`)
+      - traefik.http.routers.dixnt.tls.certresolver=default
+      - traefik.http.services.dixnt.loadbalancer.server.port=3000
+      # Redirect plain http to https
+      - traefik.http.routers.dixnt-http.entrypoints=http
+      - traefik.http.routers.dixnt-http.rule=Host(`dixnt.y-less.com`)
+      - traefik.http.routers.dixnt-http.middlewares=dixnt-https
+      - traefik.http.middlewares.dixnt-https.redirectscheme.scheme=https
+
+networks:
+  gateway:
+    external: true
+
+volumes:
+  dixnt-data:
